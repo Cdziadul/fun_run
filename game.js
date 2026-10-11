@@ -15,7 +15,8 @@
   document.body.append(touch);
   const W = 1100, H = 620, ground = 490;
   let mode = 'menu', previous = 0, time = 0, camera = 0, speed = 235;
-  let platforms = [], enemies = [], obstacles = [], bullets = [], sparks = [];
+  let platforms = [], enemies = [], birds = [], obstacles = [], bullets = [], sparks = [];
+  let birdKills = 0, nextBird = 8;
   let player, edge, kills, score, best = 0, cooldown = 0, jumpBuffer = 0, coyote = 0;
   const keys = new Set();
   try { best = Number(localStorage.getItem('fun-run-best')) || 0; } catch {}
@@ -43,7 +44,8 @@
   function start() {
     time = camera = kills = score = cooldown = jumpBuffer = coyote = 0; speed = 235;
     player = { x: 150, y: ground - 48, w: 30, h: 48, vy: 0, grounded: true };
-    platforms = []; enemies = []; obstacles = []; bullets = []; sparks = []; keys.clear();
+    platforms = []; enemies = []; birds = []; obstacles = []; bullets = []; sparks = []; keys.clear();
+    birdKills = 0; nextBird = 8;
     addPlatform(-200, 1100); edge = 900; generate();
     menu.hidden = true; canvas.hidden = hud.hidden = touch.hidden = false; overlay.hidden = true;
     document.body.classList.add('playing'); mode = 'running'; previous = performance.now();
@@ -55,7 +57,7 @@
   function end(reason) {
     mode = 'over'; keys.clear(); best = Math.max(best, score);
     try { localStorage.setItem('fun-run-best', String(best)); } catch {}
-    panel('RUN COMPLETE', `${reason}<br>Score: ${score.toLocaleString()} · Aliens: ${kills}<br>Survived ${time.toFixed(1)}s · Best: ${best.toLocaleString()}`, 'PLAY AGAIN', start);
+    panel('RUN COMPLETE', `${reason}<br>Score: ${score.toLocaleString()} · Aliens: ${kills} · Birds: ${birdKills}<br>Survived ${time.toFixed(1)}s · Best: ${best.toLocaleString()}`, 'PLAY AGAIN', start);
   }
   function pause() {
     if (mode !== 'running') return;
@@ -85,6 +87,41 @@
   function burst(x, y) {
     for (let i = 0; i < 12; i++) sparks.push({ x, y, vx: random(-160, 160), vy: random(-180, 100), life: .5 });
   }
+  function updateBirds(dt) {
+    nextBird -= dt;
+    if (nextBird <= 0 && birds.length === 0) {
+      // Predict the impact point and allow early encounters only on clear solid ground.
+      const targetX = player.x + speed * 1.6;
+      const safe = platforms.some(p => !p.bridge && p.x < targetX - 80 && p.x + p.w > targetX + 110)
+        && ![...obstacles, ...enemies].some(o => o.x < targetX + 110 && o.x + o.w > targetX - 80);
+      if (time > 35 || safe) {
+        birds.push({ x: player.x + 490, y: 100, w: 38, h: 24, age: 0, state: 'approach' });
+        nextBird = random(Math.max(3.5, 7 - time * .035), Math.max(5, 10 - time * .035));
+      } else nextBird = .4;
+    }
+    for (const bird of birds) {
+      bird.age += dt;
+      if (bird.state === 'approach') {
+        bird.x += (speed - 110) * dt;
+        bird.y = 100 + Math.min(1, bird.age / .9) * 200;
+        if (bird.age >= .9) {
+          bird.state = 'dive'; bird.age = 0;
+          bird.startX = bird.x; bird.startY = bird.y;
+          // Lock once: movement after this warning can dodge the dive.
+          bird.targetX = player.x + speed * .7;
+          bird.targetY = ground - 42;
+        }
+      } else if (bird.state === 'dive') {
+        const t = Math.min(1, bird.age / .7);
+        bird.x = bird.startX + (bird.targetX - bird.startX) * t;
+        bird.y = bird.startY + (bird.targetY - bird.startY) * t * t;
+        if (t === 1) { bird.state = 'climb'; bird.age = 0; }
+      } else {
+        bird.x += (speed - 240) * dt;
+        bird.y -= 300 * dt;
+      }
+    }
+  }
   function update(dt) {
     time += dt; speed = Math.min(380, 235 + time * 1.7); camera += speed * dt;
     const direction = Number(keys.has('ArrowRight')) - Number(keys.has('ArrowLeft'));
@@ -102,6 +139,7 @@
         if (p.bridge && p.timer === null) p.timer = .23;
       }
     }
+    updateBirds(dt);
     cooldown -= dt;
     if (keys.has('Space') && cooldown <= 0) {
       bullets.push({ x: player.x + player.w + 12, y: player.y + 20, w: 16, h: 5 }); cooldown = .17;
@@ -111,15 +149,20 @@
       for (const e of enemies) if (!e.dead && !b.dead && overlaps(b, e)) {
         e.dead = b.dead = true; kills++; burst(e.x + 17, e.y + 20);
       }
+      for (const bird of birds) if (!bird.dead && !b.dead && overlaps(b, bird)) {
+        bird.dead = b.dead = true; birdKills++; burst(bird.x + 19, bird.y + 12);
+      }
     }
     bullets = bullets.filter(b => !b.dead && b.x < camera + W + 100);
     enemies = enemies.filter(e => !e.dead && e.x > camera - 100);
+    birds = birds.filter(b => !b.dead && b.x + b.w > camera - 100 && b.y > -80);
     platforms = platforms.filter(p => p.x + p.w > camera - 100 && p.y < H + 150);
     obstacles = obstacles.filter(o => o.x + o.w > camera - 100);
     for (const s of sparks) { s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 400 * dt; s.life -= dt; }
     sparks = sparks.filter(s => s.life > 0);
-    score = Math.floor(time * 10) + kills * 100;
-    hud.innerHTML = `<div>${score.toLocaleString()} POINTS<small>${time.toFixed(1)}s survived · ${kills} aliens × 100</small></div><div>BEST ${best.toLocaleString()}<small>↑ Jump · Space Shoot · P Pause</small></div>`;
+    score = Math.floor(time * 10) + kills * 100 + birdKills * 150;
+    hud.innerHTML = `<div>${score.toLocaleString()} POINTS<small>${time.toFixed(1)}s · ${kills} aliens × 100 · ${birdKills} birds × 150</small></div><div>BEST ${best.toLocaleString()}<small>↑ Jump · Space Shoot · P Pause</small></div>`;
+    if (birds.some(b => overlaps(player, b))) return end('A swooping bird caught you.');
     if (enemies.some(e => overlaps(player, e))) return end('An alien caught you.');
     if (obstacles.some(o => overlaps(player, o))) return end('Watch out for the spikes.');
     if (player.y > H || player.x + player.w < camera) return end('The outpost claimed another runner.');
@@ -160,6 +203,20 @@
       rect(e.x + 5, e.y + 33, 7, 9, '#8c66c5'); rect(e.x + 23, e.y + 33, 7, 9, '#8c66c5');
       rect(e.x + 7, e.y, 3, 9, '#bb90ff'); rect(e.x + 24, e.y, 3, 9, '#bb90ff');
     }
+    for (const bird of birds) {
+      if (bird.state === 'dive') {
+        ctx.strokeStyle = '#ffbc70'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(bird.targetX + bird.w / 2, ground - 2, 27, 6, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      const wing = Math.sin(time * 22) * 14;
+      ctx.fillStyle = '#ffbc70';
+      ctx.beginPath(); ctx.moveTo(bird.x + 18, bird.y + 12);
+      ctx.lineTo(bird.x - 12, bird.y - 6 + wing); ctx.lineTo(bird.x + 6, bird.y + 20);
+      ctx.lineTo(bird.x + 33, bird.y + 18); ctx.lineTo(bird.x + 49, bird.y - 6 + wing); ctx.closePath(); ctx.fill();
+      rect(bird.x + 4, bird.y + 6, 28, 16, '#ef895f');
+      rect(bird.x, bird.y + 9, 10, 10, '#ffd7a0'); rect(bird.x + 3, bird.y + 10, 4, 4, '#172339');
+      ctx.fillStyle = '#ffe8a8'; ctx.beginPath(); ctx.moveTo(bird.x, bird.y + 13); ctx.lineTo(bird.x - 10, bird.y + 17); ctx.lineTo(bird.x, bird.y + 19); ctx.fill();
+    }
     const p = player, step = p.grounded ? Math.sin(time * 19) * 5 : 3;
     rect(p.x + 5, p.y, 23, 20, '#e8f5fa'); rect(p.x + 15, p.y + 5, 15, 9, '#52d7c2');
     rect(p.x + 4, p.y + 20, 22, 18, '#55ddb4'); rect(p.x - 3, p.y + 22, 7, 17, '#319d90');
@@ -168,7 +225,7 @@
     for (const b of bullets) { rect(b.x, b.y, b.w, b.h, '#fff1a1'); rect(b.x - 8, b.y + 1, 8, 3, '#efad52'); }
     for (const s of sparks) { ctx.globalAlpha = s.life * 2; rect(s.x, s.y, 5, 5, '#d1a1ff'); }
     ctx.globalAlpha = 1; ctx.restore();
-    ctx.fillStyle = '#8faab6'; ctx.font = '12px system-ui'; ctx.fillText('KEEP MOVING  /  BRIDGES CRUMBLE  /  ALIENS +100', 28, H - 28);
+    ctx.fillStyle = '#8faab6'; ctx.font = '12px system-ui'; ctx.fillText('BRIDGES CRUMBLE  /  ALIENS +100  /  BIRDS +150 — DODGE THE DIVE', 28, H - 28);
     ctx.restore();
   }
   function frame(now) {
