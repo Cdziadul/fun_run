@@ -1,0 +1,13 @@
+body.playing { overflow: hidden; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; background: #0b1020; }
+#hud { position: fixed; top: 20px; left: 24px; right: 24px; display: flex; justify-content: space-between; gap: 16px; pointer-events: none; font-weight: 700; color: #edfaff; text-shadow: 0 2px 6px #000; }
+#hud small { display: block; margin-top: 5px; color: #a8b8cc; font-size: 12px; font-weight: 400; }
+#overlay { position: fixed; inset: 0; display: grid; place-items: center; background: #070e20c9; padding: 24px; text-align: center; }
+#overlay h2 { font-size: clamp(32px, 7vw, 64px); margin: 0 0 16px; }
+#overlay p { color: #bdcbdc; line-height: 1.7; }
+#overlay button { min-height: 64px; font-size: 20px; margin-top: 16px; }
+[hidden] { display: none !important; }
+#touch { position: fixed; bottom: 20px; left: 16px; right: 16px; display: flex; gap: 10px; justify-content: space-between; }
+#touch div { display: flex; gap: 10px; }
+#touch button { min-width: 54px; min-height: 54px; padding: 10px; font-size: 16px; border-radius: 12px; box-shadow: none; opacity: .8; touch-action: none; user-select: none; }
+@media (hover: hover) and (pointer: fine) { #touch { display: none; } }
